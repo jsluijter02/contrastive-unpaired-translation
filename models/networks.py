@@ -195,24 +195,18 @@ def init_weights(net, init_type='normal', init_gain=0.02, debug=False):
     net.apply(init_func)  # apply the initialization function <init_func>
 
 
-def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[], debug=False, initialize_weights=True):
-    """Initialize a network: 1. register CPU/GPU device (with multi-GPU support); 2. initialize the network weights
-    Parameters:
-        net (network)      -- the network to be initialized
-        init_type (str)    -- the name of an initialization method: normal | xavier | kaiming | orthogonal
-        gain (float)       -- scaling factor for normal, xavier and orthogonal.
-        gpu_ids (int list) -- which GPUs the network runs on: e.g., 0,1,2
+def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[], debug=False, initialize_weights=True, device=None):
+    """Initialize a network with device support (CPU, MPS, or CUDA)"""
+    if device is None:
+        device = torch.device("cuda:0" if (len(gpu_ids) > 0 and torch.cuda.is_available()) else
+                              "mps" if torch.backends.mps.is_available() else "cpu")
+    
+    net.to(device)
 
-    Return an initialized network.
-    """
-    if len(gpu_ids) > 0:
-        assert(torch.cuda.is_available())
-        net.to(gpu_ids[0])
-        # if not amp:
-        # net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs for non-AMP training
     if initialize_weights:
         init_weights(net, init_type, init_gain=init_gain, debug=debug)
     return net
+
 
 
 def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, init_type='normal',
@@ -265,7 +259,7 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = G_Resnet(input_nc, output_nc, opt.nz, num_downs=2, n_res=n_blocks - 4, ngf=ngf, norm='inst', nl_layer='relu')
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
-    return init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netG))
+    return init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netG), device=opt.device)
 
 
 def define_F(input_nc, netF, norm='batch', use_dropout=False, init_type='normal', init_gain=0.02, no_antialias=False, gpu_ids=[], opt=None):
@@ -281,7 +275,7 @@ def define_F(input_nc, netF, norm='batch', use_dropout=False, init_type='normal'
         net = StridedConvF(init_type=init_type, init_gain=init_gain, gpu_ids=gpu_ids)
     else:
         raise NotImplementedError('projection model name [%s] is not recognized' % netF)
-    return init_net(net, init_type, init_gain, gpu_ids)
+    return init_net(net, init_type, init_gain, gpu_ids, device=opt.device)
 
 
 def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, no_antialias=False, gpu_ids=[], opt=None):
@@ -328,7 +322,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
     return init_net(net, init_type, init_gain, gpu_ids,
-                    initialize_weights=('stylegan2' not in netD))
+                    initialize_weights=('stylegan2' not in netD), device=opt.device)
 
 
 ##############################################################################
@@ -544,8 +538,7 @@ class PatchSampleF(nn.Module):
         for mlp_id, feat in enumerate(feats):
             input_nc = feat.shape[1]
             mlp = nn.Sequential(*[nn.Linear(input_nc, self.nc), nn.ReLU(), nn.Linear(self.nc, self.nc)])
-            if len(self.gpu_ids) > 0:
-                mlp.cuda()
+            mlp.to(feat.device)
             setattr(self, 'mlp_%d' % mlp_id, mlp)
         init_net(self, self.init_type, self.init_gain, self.gpu_ids)
         self.mlp_init = True
